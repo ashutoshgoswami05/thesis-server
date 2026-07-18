@@ -5,3 +5,5 @@ __pycache__/
 results/*.csv
 *.log
 .DS_Store
+thesis-notes/
+ch*.md
