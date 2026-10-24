@@ -1,0 +1,35 @@
+name: ceph
+
+# Single-node Ceph (MON+MGR+OSD+RGW via supervisord in one container --
+# no systemd, so this runs directly under Docker Desktop's existing Linux
+# backend). This is NOT the MicroCeph snap package -- MicroCeph specifically
+# requires systemd/snapd and cannot run inside a plain container on any OS.
+# Documented substitute for the thesis's fifth backend; see
+# the thesis for the full rationale.
+#
+# RBD and CephFS are disabled -- out of scope for an S3-only comparison and
+# both add real RAM/CPU overhead we don't need on an 8GB host.
+services:
+  ceph-aio:
+    image: quay.io/benjamin_holmes/ceph-aio@sha256:876d38c8eaf6f6e9d1bade8b6b910485d0b536b5b5266f1e3635ede928fd29b9
+    container_name: ceph-aio
+    env_file:
+      - ceph.env
+    ports:
+      - "6789:6789"
+      - "3300:3300"
+      - "8000:8000"
+      - "8443:8443"
+    volumes:
+      - ceph-data:/var/lib/ceph
+      - ceph-config:/etc/ceph
+    networks:
+      - thesis-net
+
+networks:
+  thesis-net:
+    external: true
+
+volumes:
+  ceph-data:
+  ceph-config:

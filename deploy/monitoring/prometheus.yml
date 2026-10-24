@@ -1,0 +1,52 @@
+global:
+  # 5s rather than the usual 15s: benchmark runs here are short (some
+  # finish in well under a minute), and at 15s a whole run could be
+  # covered by only two or three scrapes -- not enough points to take a
+  # meaningful mean or catch a peak. Higher resolution costs more storage,
+  # which is irrelevant at this scale.
+  scrape_interval: 5s
+
+scrape_configs:
+  - job_name: "cadvisor"
+    static_configs:
+      - targets: ["cadvisor:8080"]
+
+  # Garage's admin API requires Bearer-token auth, using the metrics_token
+  # from infra/garage/garage.toml.
+  - job_name: "garage"
+    bearer_token: "HIS/aGcDg29EFzilZMFoc9vV72cTr0M0N8R2X+r85xo="
+    static_configs:
+      - targets: ["garage:3903"]
+
+  # SeaweedFS exposes native metrics on a dedicated port per component,
+  # with no authentication.
+  - job_name: "seaweedfs"
+    static_configs:
+      - targets:
+          - "seaweedfs-s3:9327"
+          - "seaweedfs-master:9324"
+          - "seaweedfs-volume:9325"
+          - "seaweedfs-filer:9326"
+
+  # JuiceFS's metrics server binds 127.0.0.1 inside its own container by
+  # default, which Prometheus cannot reach from another container. The
+  # gateway's command in infra/juicefs/docker-compose.yml therefore passes
+  # `--metrics 0.0.0.0:9567`.
+  - job_name: "juicefs"
+    static_configs:
+      - targets: ["juicefs-gateway:9567"]
+
+  # Three backends are deliberately not scraped natively, and their
+  # resource usage comes from cAdvisor only:
+  #
+  # RustFS exposes no native metrics endpoint.
+  #
+  # Ceph (ceph-aio) has a `prometheus` mgr module, but enabling it put the
+  # mgr daemon into a restart loop on this single-mgr container, with
+  # `ceph -s` reporting no active mgr. Disabling the module restored
+  # HEALTH_OK. It was not re-attempted: the container has no second mgr to
+  # fail over to.
+  #
+  # MinIO's metrics endpoint uses JWT or public-mode auth rather than the
+  # SigV4 and Bearer schemes above, so wiring it up would mean redeploying
+  # with MINIO_PROMETHEUS_AUTH_TYPE=public or generating a JWT.

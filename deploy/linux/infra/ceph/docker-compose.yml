@@ -1,0 +1,48 @@
+name: ceph
+
+# VPS copy: every published port is bound to 127.0.0.1 so the backend is
+# reachable from the measurement host only. The harness connects over
+# localhost and warp over thesis-net, so neither is affected. To reach
+# Grafana or Prometheus from a laptop, tunnel instead:
+#     ssh -L 3000:localhost:3000 -L 9090:localhost:9090 thesis
+
+# Single-node Ceph (MON+MGR+OSD+RGW via supervisord in one container --
+# no systemd, so this runs directly under Docker Desktop's existing Linux
+# backend). This is NOT the MicroCeph snap package -- MicroCeph specifically
+# requires systemd/snapd and cannot run inside a plain container on any OS.
+# Documented substitute for the thesis's fifth backend; see
+# the thesis for the full rationale.
+#
+# RBD and CephFS are disabled -- out of scope for an S3-only comparison and
+# both add real RAM/CPU overhead we don't need on an 8GB host.
+services:
+  ceph-aio:
+    # Ceph 19.2.7, NOT the 19.2.5 the thesis measured. The thesis's manifest
+    # (876d38c8eaf6, in the Chapter 6 table) has been withdrawn from quay.io
+    # and is not held by any surviving dated tag, so it cannot be pulled on a
+    # new machine. The repository copy under infra/ stays pinned to it; this
+    # one is pinned to what a fresh VPS can actually obtain. Ceph is therefore
+    # the one backend where a difference against Chapter 7 cannot be
+    # attributed to the hardware.
+    image: quay.io/benjamin_holmes/ceph-aio@sha256:09c4ad2c87ba9470ab3caaa47622852be446501729ec4c4efee90308b0a2b353
+    container_name: ceph-aio
+    env_file:
+      - ceph.env
+    ports:
+      - "127.0.0.1:6789:6789"
+      - "127.0.0.1:3300:3300"
+      - "127.0.0.1:8000:8000"
+      - "127.0.0.1:8443:8443"
+    volumes:
+      - ceph-data:/var/lib/ceph
+      - ceph-config:/etc/ceph
+    networks:
+      - thesis-net
+
+networks:
+  thesis-net:
+    external: true
+
+volumes:
+  ceph-data:
+  ceph-config:

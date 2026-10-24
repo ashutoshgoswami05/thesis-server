@@ -1,0 +1,83 @@
+name: juicefs
+
+# VPS copy: every published port is bound to 127.0.0.1 so the backend is
+# reachable from the measurement host only. The harness connects over
+# localhost and warp over thesis-net, so neither is affected. To reach
+# Grafana or Prometheus from a laptop, tunnel instead:
+#     ssh -L 3000:localhost:3000 -L 9090:localhost:9090 thesis
+
+# JuiceFS is architecturally different from every other backend here: it is
+# a POSIX filesystem (Redis metadata engine + a data backend) exposed
+# through an S3 gateway built on the MinIO gateway framework, which is why
+# the gateway takes MINIO_ROOT_USER/MINIO_ROOT_PASSWORD rather than
+# ACCESS_KEY/SECRET_KEY. It is not a flat object store: every S3 PUT and
+# GET passes through the filesystem layer before reaching the data
+# backend.
+#
+# Three steps, in order:
+# 1. redis          -- the metadata engine (file names, permissions, chunk
+#                       maps). Plain Redis, nothing JuiceFS-specific here.
+# 2. juicefs-format  -- a ONE-SHOT init step (`juicefs format`) that
+#                       creates the filesystem's metadata in Redis and
+#                       records which data backend it uses. Must run
+#                       exactly once, before the gateway starts.
+# 3. juicefs-gateway -- the long-running S3 gateway process. Mounts the
+#                       SAME data volume as juicefs-format, since --storage
+#                       file writes actual object bytes straight to that
+#                       local path.
+#
+# Local-disk storage (--storage file) is explicitly documented as
+# single-machine/non-production only (JuiceFS's own docs) -- fine for this
+# thesis's testing purposes, not something to read as a production
+# deployment pattern.
+
+services:
+  redis:
+    image: redis@sha256:e7723ff73d963f5cc6d9c4643ea3d989527a402a319239054e9472a7fb9219a2
+    container_name: juicefs-redis
+    volumes:
+      - juicefs-redis-data:/data
+    networks:
+      - thesis-net
+
+  juicefs-format:
+    image: juicedata/mount@sha256:7401035624a1cfe906355fc990685ead5722d41a6525dddee285ede2269e19d2
+    container_name: juicefs-format
+    depends_on:
+      - redis
+    volumes:
+      - juicefs-data:/data
+    command: ["juicefs", "format", "--storage", "file", "--bucket", "/data", "redis://juicefs-redis:6379/1", "thesisjfs"]
+    restart: "no"
+    networks:
+      - thesis-net
+
+  juicefs-gateway:
+    image: juicedata/mount@sha256:7401035624a1cfe906355fc990685ead5722d41a6525dddee285ede2269e19d2
+    container_name: juicefs-gateway
+    depends_on:
+      juicefs-format:
+        condition: service_completed_successfully
+    environment:
+      - MINIO_ROOT_USER=thesisjuiceaccess
+      - MINIO_ROOT_PASSWORD=thesisjuicesecret123
+    ports:
+      - "127.0.0.1:9004:9090"
+      - "127.0.0.1:9567:9567"
+    volumes:
+      - juicefs-data:/data
+    # --multi-buckets exports each top-level directory as a bucket, so
+    # buckets can be created on demand; --keep-etag stores the ETag the
+    # gateway would otherwise drop. Both are documented options of this
+    # version, and without them the gateway exposes a single fixed bucket.
+    command: ["juicefs", "gateway", "--multi-buckets", "--keep-etag", "--metrics", "0.0.0.0:9567", "redis://juicefs-redis:6379/1", "0.0.0.0:9090"]
+    networks:
+      - thesis-net
+
+volumes:
+  juicefs-redis-data:
+  juicefs-data:
+
+networks:
+  thesis-net:
+    external: true

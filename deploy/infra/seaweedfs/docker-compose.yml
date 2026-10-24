@@ -1,0 +1,85 @@
+name: seaweedfs
+
+# Adapted from the official docker/seaweedfs-compose.yml
+# (github.com/seaweedfs/seaweedfs/blob/master/docker/seaweedfs-compose.yml):
+# master/volume/filer/s3 services, same ports and metricsPorts. Dropped the
+# official example's `webdav` and bundled `prometheus` services -- not
+# needed here (one shared monitoring stack serves every backend,
+# not a per-backend Prometheus instance). Container names prefixed with
+# `seaweedfs-` (the official example just uses bare `master`/`volume`/
+# `filer`/`s3`) since these all share the `thesis-net` network with every
+# other backend, and bare names like that risk colliding with something
+# else on the same network later.
+#
+# Also dropped the gRPC port mappings the official example publishes to
+# the host (master's 19333, volume's 18080, filer's 18888 -- SeaweedFS's
+# convention is HTTP port + 10000 for gRPC). These are only used for
+# internal master/volume/filer/s3 communication, which happens over
+# thesis-net regardless of whether the port is also published to the host
+# -- nothing outside the Docker network needs to reach them directly.
+
+services:
+  seaweedfs-master:
+    image: chrislusf/seaweedfs@sha256:52194fba4fecd0083c842158b3a902ba6e04a63619b2b0efcd08007bdb6a4602
+    container_name: seaweedfs-master
+    ports:
+      - "9333:9333"
+      - "9324:9324"
+    command: "master -ip=seaweedfs-master -ip.bind=0.0.0.0 -metricsPort=9324"
+    networks:
+      - thesis-net
+
+  seaweedfs-volume:
+    image: chrislusf/seaweedfs@sha256:52194fba4fecd0083c842158b3a902ba6e04a63619b2b0efcd08007bdb6a4602
+    container_name: seaweedfs-volume
+    ports:
+      - "8080:8080"
+      - "9325:9325"
+    command: 'volume -ip=seaweedfs-volume -master="seaweedfs-master:9333" -ip.bind=0.0.0.0 -port=8080 -metricsPort=9325 -dir=/data'
+    volumes:
+      - seaweedfs-data:/data
+    depends_on:
+      - seaweedfs-master
+    networks:
+      - thesis-net
+
+  seaweedfs-filer:
+    image: chrislusf/seaweedfs@sha256:52194fba4fecd0083c842158b3a902ba6e04a63619b2b0efcd08007bdb6a4602
+    container_name: seaweedfs-filer
+    ports:
+      - "8888:8888"
+      - "9326:9326"
+    command: 'filer -ip=seaweedfs-filer -master="seaweedfs-master:9333" -ip.bind=0.0.0.0 -metricsPort=9326'
+    tty: true
+    stdin_open: true
+    depends_on:
+      - seaweedfs-master
+      - seaweedfs-volume
+    networks:
+      - thesis-net
+
+  seaweedfs-s3:
+    image: chrislusf/seaweedfs@sha256:52194fba4fecd0083c842158b3a902ba6e04a63619b2b0efcd08007bdb6a4602
+    container_name: seaweedfs-s3
+    ports:
+      - "8333:8333"
+      - "9327:9327"
+    # Without -config the gateway runs in allow-all mode: it permits every
+    # operation and never verifies a signature, which would make the fidelity
+    # results meaningless (see tests/test_api_fidelity.py, signature check).
+    volumes:
+      - ./s3.json:/etc/seaweedfs/s3.json:ro
+    command: 's3 -filer="seaweedfs-filer:8888" -ip.bind=0.0.0.0 -metricsPort=9327 -config=/etc/seaweedfs/s3.json'
+    depends_on:
+      - seaweedfs-master
+      - seaweedfs-volume
+      - seaweedfs-filer
+    networks:
+      - thesis-net
+
+volumes:
+  seaweedfs-data:
+
+networks:
+  thesis-net:
+    external: true
