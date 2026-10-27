@@ -101,9 +101,17 @@ wait_for_mon () {
 bootstrap_cluster () {
   local fsid ip
   ip=$(require_ip)
-  fsid=$(uuidgen)
-  echo "$fsid" > "$FSID_FILE"
-  log "bootstrapping cluster $fsid at $ip"
+  # Reuse the identity of a bootstrap that did not finish, so a retry
+  # continues the same cluster instead of inventing a second one whose fsid
+  # disagrees with the keyrings already on the volume.
+  if [ -s "$FSID_FILE" ]; then
+    fsid=$(cat "$FSID_FILE")
+    log "resuming an unfinished bootstrap of $fsid at $ip"
+  else
+    fsid=$(uuidgen)
+    echo "$fsid" > "$FSID_FILE"
+    log "bootstrapping cluster $fsid at $ip"
+  fi
 
   # osd crush chooseleaf type = 0 lets CRUSH place replicas on OSDs rather
   # than hosts, which is what makes a single-node cluster reach HEALTH_OK.
@@ -137,19 +145,27 @@ rgw frontends = beast port=${RGW_PORT}
 rgw thread pool size = 128
 ENDCONF
 
-  ceph-authtool --create-keyring "$MON_KEYRING" \
-    --gen-key -n mon. --cap mon 'allow *'
-  ceph-authtool --create-keyring "$ADMIN_KEYRING" \
-    --gen-key -n client.admin \
-    --cap mon 'allow *' --cap osd 'allow *' \
-    --cap mds 'allow *' --cap mgr 'allow *'
+  # Each step here is skipped if a previous attempt already did it.
+  # ceph-authtool --create-keyring and monmaptool --create both fail on a
+  # file that already exists, which is what turned one interrupted bootstrap
+  # into a monitor that could never start again.
+  if [ ! -f "$MON_KEYRING" ]; then
+    ceph-authtool --create-keyring "$MON_KEYRING" \
+      --gen-key -n mon. --cap mon 'allow *'
+  fi
+  if [ ! -f "$ADMIN_KEYRING" ]; then
+    ceph-authtool --create-keyring "$ADMIN_KEYRING" \
+      --gen-key -n client.admin \
+      --cap mon 'allow *' --cap osd 'allow *' \
+      --cap mds 'allow *' --cap mgr 'allow *'
+  fi
   ceph-authtool "$MON_KEYRING" --import-keyring "$ADMIN_KEYRING"
 
   # --addv with both addresses, not --add: a plain --add registers the v1
   # address only, which leaves the cluster on the legacy messenger and
   # reports "1 monitors have not enabled msgr2". A default Ceph deployment
   # speaks msgr2, so measuring against v1 would not be measuring the default.
-  monmaptool --create \
+  monmaptool --create --clobber \
     --addv "$MON_NAME" "[v2:${ip}:3300,v1:${ip}:6789]" \
     --fsid "$fsid" "$MONMAP"
 
@@ -183,10 +199,16 @@ refresh_mon_address () {
 
 run_mon () {
   mkdir -p /var/lib/ceph/tmp
-  if [ ! -f "$FSID_FILE" ]; then
-    bootstrap_cluster
-  else
+  # Whether the cluster exists is decided by the monitor store, which only
+  # appears once ceph-mon --mkfs has succeeded -- not by the fsid file, which
+  # bootstrap_cluster writes before doing any of the work. Keying on the fsid
+  # meant one interrupted bootstrap sent every later start down the "already
+  # set up" path, where it found nothing to refresh and then launched a
+  # monitor whose data directory had never been created.
+  if [ -f "/var/lib/ceph/mon/${CLUSTER}-${MON_NAME}/keyring" ]; then
     refresh_mon_address
+  else
+    bootstrap_cluster
   fi
   chown -R ceph:ceph /var/lib/ceph /etc/ceph
   log "starting ceph-mon"
