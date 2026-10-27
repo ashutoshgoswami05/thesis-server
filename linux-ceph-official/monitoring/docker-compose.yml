@@ -1,0 +1,54 @@
+name: monitoring
+
+services:
+  cadvisor:
+    image: gcr.io/cadvisor/cadvisor@sha256:3de2bd5203120b866d74a9b283b2ffb8ec382fbf9dc321814700c6ea6f44ec57
+    container_name: cadvisor
+    ports:
+      # Host-side 8081, not 8080 -- collides with SeaweedFS's volume
+      # server, which also publishes 8080:8080. Container-internal port
+      # stays 8080 (what Prometheus scrapes via thesis-net), unaffected.
+      - "8081:8080"
+    volumes:
+      - /:/rootfs:ro
+      - /var/run:/var/run:ro
+      - /sys:/sys:ro
+      - /var/lib/docker/:/var/lib/docker:ro
+      - /dev/disk/:/dev/disk:ro
+    privileged: true
+    networks:
+      - thesis-net
+
+  prometheus:
+    image: prom/prometheus@sha256:3c42b892cf723fa54d2f262c37a0e1f80aa8c8ddb1da7b9b0df9455a35a7f893
+    container_name: prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      # Named volume so scraped history survives a `docker compose down`.
+      # Without this, restarting the monitoring stack silently wipes every
+      # previously-recorded time series -- which happened once during
+      # and invalidated already-collected benchmark windows
+      # (analysis/pull_metrics.py returned no data for 5 of 6 backends).
+      - prometheus-data:/prometheus
+    networks:
+      - thesis-net
+
+  grafana:
+    image: grafana/grafana@sha256:121a7a9ece6dc10b969f1f96eed64b4f07dfac0d0b8abc070f7cb83bbde86f63
+    container_name: grafana
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./grafana-provisioning/datasources:/etc/grafana/provisioning/datasources:ro
+      - ./grafana-provisioning/dashboards:/etc/grafana/provisioning/dashboards:ro
+    networks:
+      - thesis-net
+
+volumes:
+  prometheus-data:
+
+networks:
+  thesis-net:
+    external: true

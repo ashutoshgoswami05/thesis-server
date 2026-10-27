@@ -1,0 +1,23 @@
+name: rustfs
+
+services:
+  rustfs:
+    image: rustfs/rustfs@sha256:60f4f2f41ce95216f8cac676e69f9d90c0bfec458a3bc7fd7fb9b7c2452ac57a
+    container_name: rustfs
+    env_file:
+      - rustfs.env
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - rustfs-data:/data
+    command: ["/data"]
+    networks:
+      - thesis-net
+
+volumes:
+  rustfs-data:
+
+networks:
+  thesis-net:
+    external: true

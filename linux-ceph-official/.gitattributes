@@ -1,0 +1,12 @@
+# Every script here runs on Linux. Checked out with CRLF endings they fail in
+# ways that do not look like line-ending problems: bash reports
+# "$'\r': command not found", a `cd` into a path with a trailing \r fails, and
+# the driver then prints its headers and silently measures nothing. Forcing LF
+# on checkout keeps that from happening on a Windows clone.
+*.sh text eol=lf
+*.py text eol=lf
+*.yml text eol=lf
+*.yaml text eol=lf
+*.env text eol=lf
+*.toml text eol=lf
+*.json text eol=lf

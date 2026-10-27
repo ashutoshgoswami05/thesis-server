@@ -1,0 +1,100 @@
+# S3-compatible backend endpoints, shared by the API fidelity suite and the
+# benchmark harness. Only backends marked `enabled: true` are exercised by a
+# given run, so backends can be deployed and measured one at a time, which
+# is what keeps them from competing for the same host memory and CPU.
+#
+# The credentials below are throwaway values for local containers that are
+# reachable only from this host. They are redacted by latex/sync_listings.sh
+# before the file is reproduced in the thesis.
+
+backends:
+  rustfs:
+    enabled: true
+    endpoint: "http://localhost:9000"
+    access_key: "thesisaccesskey"
+    secret_key: "thesissecretkey1234"
+    region: "us-east-1"
+    notes: >
+      Single-container deployment (infra/rustfs/docker-compose.yml). No
+      native Prometheus metrics endpoint, so resource usage for this
+      backend comes from cAdvisor only.
+
+  garage:
+    enabled: true
+    endpoint: "http://localhost:3900"
+    access_key: "GKea1446f9810cbd0b8633f9a64361357d"
+    secret_key: "4c1c9e2085c276979148580c92c4bd14a3fa554efc2ba7f72937d14ccbb4ed7c"
+    region: "garage"
+    notes: >
+      Single-container deployment (infra/garage/docker-compose.yml), Garage
+      v2.3.0 with --single-node and --default-bucket. Exposes a Prometheus
+      metrics endpoint on the admin API (port 3903), which requires
+      Bearer-token auth using the metrics_token from
+      infra/garage/garage.toml.
+
+  seaweedfs:
+    enabled: true
+    endpoint: "http://localhost:8333"
+    access_key: "thesisseaweedaccess"
+    secret_key: "thesisseaweedsecret123"
+    region: "us-east-1"
+    notes: >
+      Multi-container deployment (infra/seaweedfs/docker-compose.yml:
+      master, volume, filer and s3), adapted from the project's own
+      docker/seaweedfs-compose.yml. The S3 gateway verifies signatures only
+      when identities are configured, so it is started with
+      -config=/etc/seaweedfs/s3.json (infra/seaweedfs/s3.json) holding the
+      keys above. Native Prometheus metrics on a dedicated port per service
+      (s3:9327, master:9324, volume:9325, filer:9326), with no
+      authentication.
+
+  juicefs:
+    enabled: true
+    endpoint: "http://localhost:9004"
+    access_key: "thesisjuiceaccess"
+    secret_key: "thesisjuicesecret123"
+    region: "us-east-1"
+    notes: >
+      A POSIX filesystem (Redis metadata engine and a local-disk data
+      backend, --storage file) exposed through an S3 gateway built on the
+      MinIO gateway framework (infra/juicefs/docker-compose.yml: redis, a
+      one-shot juicefs-format step, and the gateway). The gateway runs with
+      --multi-buckets, so it creates buckets on demand; without that option
+      it exposes exactly one bucket named after the filesystem given to
+      `juicefs format`, and CreateBucket for any other name fails with
+      NoSuchBucket. It also runs with --keep-etag. Its Prometheus metrics
+      bind to 127.0.0.1 inside the container by default, so the gateway is
+      given --metrics 0.0.0.0:9567.
+
+  ceph:
+    enabled: true
+    endpoint: "http://127.0.0.1:8000"
+    access_key: "thesiscephaccess"
+    secret_key: "thesiscephsecret123"
+    region: "us-east-1"
+    notes: >
+      Documented substitute for MicroCeph (infra/ceph/docker-compose.yml,
+      image quay.io/ceph/ceph v19.2.5): mon, mgr, osd and rgw daemons, one
+      per container, brought up by infra/ceph/entrypoint.sh because the
+      official image ships no entrypoint of its own. MicroCeph itself is a
+      snap package and needs snapd with systemd as PID 1, which a plain
+      container does not provide. Two quirks, both observed rather than
+      assumed: the endpoint must be given as an IP literal, because RGW
+      applies virtual-host bucket parsing to hostnames; and an explicit
+      region matching a real AWS region name must be passed, because
+      recent versions of the AWS client otherwise send a pseudo-region that
+      RGW rejects with InvalidLocationConstraint.
+
+  minio:
+    enabled: true
+    endpoint: "http://localhost:9002"
+    access_key: "thesisminioaccess"
+    secret_key: "thesisminiosecret123"
+    region: "us-east-1"
+    notes: >
+      The reference baseline rather than one of the five compared
+      candidates (infra/minio/docker-compose.yml). Host ports 9002 for the
+      S3 API and 9003 for the console, chosen to avoid RustFS's 9000 and
+      9001. Its Prometheus endpoint uses JWT or public-mode auth
+      (MINIO_PROMETHEUS_AUTH_TYPE) rather than the SigV4 scheme RustFS and
+      Garage use, so its resource usage also comes from cAdvisor only.

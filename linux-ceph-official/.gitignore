@@ -1,0 +1,18 @@
+# Built on the target machine, not carried in.
+.venv/
+__pycache__/
+*.pyc
+
+# Measurements. Excluded so a framework push can never overwrite results, and
+# so the results that come back travel on their own branch -- which is why
+# sending them needs `git add -f bench/results` on the server.
+bench/results/
+tests/results/
+crosscheck/results/
+vps-results/
+
+# Kept as backups by linux/install.sh when it swaps in the Linux scripts.
+*.windows
+
+*.log
+.DS_Store

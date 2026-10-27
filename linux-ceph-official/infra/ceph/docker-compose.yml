@@ -1,0 +1,122 @@
+name: ceph
+
+# VPS copy: every published port is bound to 127.0.0.1 so the backend is
+# reachable from the measurement host only. The harness connects over
+# localhost and warp over thesis-net, so neither is affected. To reach
+# Grafana or Prometheus from a laptop, tunnel instead:
+#     ssh -L 3000:localhost:3000 -L 9090:localhost:9090 thesis-ceph
+#
+# Official-image variant of the Ceph backend. The repository's other stack
+# uses quay.io/benjamin_holmes/ceph-aio, a third-party all-in-one whose
+# measured manifest was withdrawn from quay.io part-way through the study.
+# This one runs quay.io/ceph/ceph, the build the Ceph project publishes
+# itself, pinned to a dated tag that cannot move.
+#
+# That image carries no orchestration at all -- its Cmd is /bin/bash and it
+# has no entrypoint, because cephadm is expected to drive it. Rather than
+# install cephadm, which wants systemd on the host and deploys a second
+# Prometheus and Grafana that would collide with monitoring/, each daemon
+# gets its own container here and entrypoint.sh performs the bring-up.
+#
+# One daemon per container also means cAdvisor reports mon, mgr, osd and rgw
+# separately; analysis/pull_metrics.py sums the four, the same way it already
+# sums SeaweedFS's master, volume, filer and s3.
+services:
+  ceph-mon:
+    # Ceph 19.2.5 (Squid), the version Chapter 7 measured, from the project's
+    # own repository, pinned to the linux/amd64 manifest behind its v19.2.5
+    # tag. A digest cannot be retagged, which is the failure that cost the
+    # all-in-one image its provenance part-way through the study.
+    image: quay.io/ceph/ceph@sha256:8d438f810ac1a2f582e7a7267daf9f0b7e10bff30071f246f2e03e932add39d3
+    container_name: ceph-mon
+    env_file:
+      - ceph.env
+    entrypoint: ["bash", "/entrypoint.sh", "mon"]
+    volumes:
+      - ./entrypoint.sh:/entrypoint.sh:ro
+      - ceph-config:/etc/ceph
+      - ceph-data:/var/lib/ceph
+    ports:
+      - "127.0.0.1:6789:6789"
+      - "127.0.0.1:3300:3300"
+    healthcheck:
+      test: ["CMD-SHELL", "ceph --connect-timeout 5 -s >/dev/null 2>&1"]
+      interval: 10s
+      timeout: 10s
+      retries: 30
+      start_period: 30s
+    networks:
+      - thesis-net
+
+  ceph-mgr:
+    image: quay.io/ceph/ceph@sha256:8d438f810ac1a2f582e7a7267daf9f0b7e10bff30071f246f2e03e932add39d3
+    container_name: ceph-mgr
+    env_file:
+      - ceph.env
+    entrypoint: ["bash", "/entrypoint.sh", "mgr"]
+    volumes:
+      - ./entrypoint.sh:/entrypoint.sh:ro
+      - ceph-config:/etc/ceph
+      - ceph-data:/var/lib/ceph
+    depends_on:
+      ceph-mon:
+        condition: service_healthy
+    networks:
+      - thesis-net
+
+  ceph-osd:
+    image: quay.io/ceph/ceph@sha256:8d438f810ac1a2f582e7a7267daf9f0b7e10bff30071f246f2e03e932add39d3
+    container_name: ceph-osd
+    env_file:
+      - ceph.env
+    entrypoint: ["bash", "/entrypoint.sh", "osd"]
+    volumes:
+      - ./entrypoint.sh:/entrypoint.sh:ro
+      - ceph-config:/etc/ceph
+      - ceph-data:/var/lib/ceph
+    depends_on:
+      ceph-mon:
+        condition: service_healthy
+    networks:
+      - thesis-net
+
+  ceph-rgw:
+    image: quay.io/ceph/ceph@sha256:8d438f810ac1a2f582e7a7267daf9f0b7e10bff30071f246f2e03e932add39d3
+    container_name: ceph-rgw
+    env_file:
+      - ceph.env
+    entrypoint: ["bash", "/entrypoint.sh", "rgw"]
+    volumes:
+      - ./entrypoint.sh:/entrypoint.sh:ro
+      - ceph-config:/etc/ceph
+      - ceph-data:/var/lib/ceph
+    ports:
+      - "127.0.0.1:8000:8000"
+    # The driver scripts wait on this container and run radosgw-admin inside
+    # it, so it is the one that has to report the whole cluster usable, not
+    # just its own process: monitor reachable, an OSD accepting writes, and
+    # the S3 port answering.
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - >-
+          ceph --connect-timeout 5 health 2>/dev/null | grep -qE 'HEALTH_OK|HEALTH_WARN'
+          && ceph --connect-timeout 5 osd stat 2>/dev/null | grep -qE '[1-9][0-9]* up'
+          && timeout 3 bash -c '</dev/tcp/127.0.0.1/8000'
+      interval: 10s
+      timeout: 15s
+      retries: 40
+      start_period: 45s
+    depends_on:
+      ceph-mon:
+        condition: service_healthy
+    networks:
+      - thesis-net
+
+networks:
+  thesis-net:
+    external: true
+
+volumes:
+  ceph-data:
+  ceph-config:
