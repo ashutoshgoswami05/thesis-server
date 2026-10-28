@@ -40,7 +40,9 @@ echo "=== $REPEATS campaigns, starting $(date -u +%H:%M:%S)"
   grep -h "image:" infra/*/docker-compose.yml monitoring/docker-compose.yml |
     sed 's/^ *image: //' | sort -u
   echo
-  echo "ceph: 19.2.7, NOT the thesis's 19.2.5 (manifest 876d38c8eaf6 withdrawn)"
+  # Recorded from the running daemons rather than asserted, because this is
+  # the line a reader will trust about which Ceph produced these numbers.
+  echo "ceph: $(docker exec ceph-rgw ceph --version 2>/dev/null | awk '{print $3}' || echo '?') from quay.io/ceph/ceph, the project's own image"
   echo "host: $(hostname), $(nproc) vCPU, $(free -g | awk '/^Mem:/{print $2}') GB RAM, $(uname -r)"
   echo "repeats: $REPEATS campaigns of 960 runs, one CSV each"
 } > bench/results/image_digests.txt
